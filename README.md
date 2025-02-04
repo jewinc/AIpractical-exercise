@@ -1,1 +1,1 @@
-This course was delivered by Pierre-Henri Paris, professor at Universite Paris-Saclay and researcher in the LISN laboratory.
+The course materials was delivered by Pierre-Henri Paris, professor at Universite Paris-Saclay and researcher in the LISN laboratory.
