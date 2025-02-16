@@ -74,14 +74,14 @@ def prepare_sentiment_data(max_features=2000, max_documents=2000):
 class Activations:
     @staticmethod
     def relu(z):
-        return max(0, z)
+        return np.maximum(0, z)
 
     @staticmethod
     def softmax(z):
         # TODO 
         tmp = z.copy()
         for i in range(len(tmp)):
-            denom = np.sum(tmp[i])
+            denom = np.sum([np.exp(c) for c in tmp[i]])
             for j in range(len(tmp[i])):
                 tmp[i][j] = np.exp(tmp[i][j])/denom
         return tmp
@@ -102,7 +102,8 @@ class Layer:
         # TODO: YOUR CODE HERE - Initialize weights and biases
         # Biases should be initialized to zeros
         # Weights should be initialized using He initialization for ReLU and Xavier initialization for softmax
-        self.bias = [0] * self.output_size
+        
+        self.bias= np.zeros((1, self.output_size))
         if self.activation_name =='relu':
             #HE init
             self.weights = np.random.normal(0, np.sqrt(2/self.input_size), (self.input_size, self.output_size))
@@ -111,6 +112,7 @@ class Layer:
             self.weights = np.random.normal(0, np.sqrt(1/(self.input_size + self.output_size)), (self.input_size, self.output_size))
         else:
             raise ValueError("activation function not recognized")
+
 
 
 class BatchNormLayer:
@@ -158,9 +160,10 @@ class BatchNormLayer:
         #       x_norm = (x - mean) / sqrt(var + eps)
         # 4. Scale and shift the normalized input using gamma and beta.
         #       return self.gamma * x_norm + self.beta
+        
         if training:
-            mean = np.mean(x, axis=1)
-            var = np.var(x, axis=1)
+            mean = np.mean(x, axis=0)
+            var = np.var(x, axis=0)
             self.running_mean = 0.9 * self.running_mean + 0.1 * mean
             self.running_var = 0.9 * self.running_var + 0.1 * var
 
@@ -237,18 +240,21 @@ class DeepNLP:
         layer_inputs : list of arrays
                 The input to each layer in the network
         """
-        layer_inputs = [X]
-        activations = []
+        layer_inputs = []
+        activations = [X]
 
-        n = len(self.layers)
-        for i in range(n):
-                layer: Layer = self.batch_norm_layers[i] if training else self.layers[i] 
-                x2 = np.matmul(layer_inputs[i], layer.weights)
-                x3 = np.add(x2, layer.bias)
-                activations.append(x3)
-                if i<n:
-                    layer_inputs.append(x3)
+        n = len(self.layers)-1
+        input = X
+        for i in range(n+1):
+                layer = self.layers[i] 
+                y = np.dot(input, layer.weights) + layer.bias
+                layer_inputs.append(y)
+                if training and isinstance(layer, BatchNormLayer) and self.batch_norm_layers[i] is not None:
+                    y = self.batch_norm_layers[i].forward(y, training=training)
+                input = layer.activation(y)
+                activations.append(input)
         return (activations, layer_inputs)
+
 
 
 class ModelTrainer:
@@ -299,7 +305,35 @@ class ModelTrainer:
     def train_batch(self, X_batch, y_batch):
         """Train on a single batch"""
         # TODO: YOUR CODE HERE - Implement backpropagation and parameter updates
-        pass
+        model: DeepNLP = self.model
+        n = len(model.layers)-1
+        activations, layer_inputs = model.forward(X_batch)
+        y_pred = activations[-1]
+        y_pred[range(len(y_batch)), y_batch] -= 1 
+        dloss = y_pred/len(y_batch)
+        grads = []
+
+        for i in reversed(range(n+1)):
+            layer: Layer = model.layers[i]
+            A_prev = activations[i]  
+            W = layer.weights
+
+            dW = np.dot(A_prev.T, dloss)
+            db = np.sum(dloss, axis=0, keepdims=True)  
+            grads.append((dW, db))
+
+            
+            if i != 0:  
+                dloss = np.dot(dloss, W.T)  
+                dloss *= A_prev > 0
+        grads.reverse()
+
+        # Update weights and biases
+        for i in range(n+1):
+            dW, db = grads[i]
+            model.layers[i].weights = model.layers[i].weights - self.learning_rate * dW
+            model.layers[i].bias = model.layers[i].bias - self.learning_rate * db
+
 
     def evaluate(self, X, y):
         """Compute accuracy for the given data"""
@@ -406,10 +440,9 @@ if __name__ == "__main__":
         X_train, y_train, test_size=0.2
     )
 
-    
+    print(X_train.shape, y_train.shape, X_valid.shape, y_valid.shape)    
     input_size = X_train.shape[1]
     num_classes = len(np.unique(y))
-
     layer_sizes = [input_size, 512, 256, 128, num_classes]
     
     model = DeepNLP(layer_sizes, activation="relu", use_batch_norm=True)
@@ -417,9 +450,9 @@ if __name__ == "__main__":
     trainer = ModelTrainer(
         model, learning_rate=0.01, batch_size=32, lr_decay=0.9, patience=5
     )
-    '''
+    
     history = trainer.train(X_train, y_train, X_valid, y_valid, epochs=50)
     
     visualizer = Visualizer()
     visualizer.plot_training_history(history)
-    '''
+    
